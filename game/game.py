@@ -41,6 +41,9 @@ class Game:
         self.shot_cooldown_remaining = max(0.0, self.shot_cooldown_remaining - dt)
         self.player.rotate(mouse_dx * settings.MOUSE_SENSITIVITY)
 
+        for enemy in self.enemies:
+            enemy.tick(dt)
+
         if keys is not None:
             if keys[pygame.K_LEFT]:
                 self.player.rotate(-settings.ROTATE_SPEED * dt)
@@ -87,7 +90,9 @@ class Game:
             self.game_map, self.player.x, self.player.y, self.player.angle,
             settings.FOV, settings.RENDER_WIDTH, settings.MAX_DEPTH,
         )
-        self.renderer.draw_frame(wall_hits, self.enemies, self.player, settings.FOV, self.ammo)
+        weapon_flash_elapsed = settings.WEAPON_COOLDOWN - self.shot_cooldown_remaining
+        self.renderer.draw_frame(wall_hits, self.enemies, self.player, settings.FOV, self.ammo,
+                                  weapon_flash_elapsed)
 
     def run(self) -> None:
         clock = pygame.time.Clock()

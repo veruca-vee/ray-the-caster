@@ -3,10 +3,12 @@
 A minimal Wolfenstein-3D-style raycaster built with Python + Pygame. You
 play as Ray, armed with a molten disk caster, in a grid-DDA raycasting
 engine with textured walls, WASD + mouse-look movement, and billboarded
-enemy sprites that take damage and die.
+enemy sprites that flash and die when hit.
 
 No external art assets — wall textures are generated procedurally at
-startup, and enemies render as simple shaded, occluded circular sprites.
+startup, the sky/floor use a gradient for depth, enemies render as
+shaded, occluded sprites with a glowing core, and the disk caster has
+a recoil + muzzle-flash animation when fired.
 
 ## Requirements
 

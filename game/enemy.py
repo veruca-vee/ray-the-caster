@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 
+HIT_FLASH_DURATION = 0.15  # seconds a hit enemy flashes brighter, for visual feedback
+
 
 class Enemy:
     def __init__(self, x: float, y: float, health: int, radius: float):
@@ -11,6 +13,7 @@ class Enemy:
         self.y = y
         self.health = health
         self.radius = radius
+        self.hit_flash_timer = 0.0
 
     @property
     def is_alive(self) -> bool:
@@ -20,6 +23,10 @@ class Enemy:
         if not self.is_alive:
             return
         self.health = max(0, self.health - amount)
+        self.hit_flash_timer = HIT_FLASH_DURATION
+
+    def tick(self, dt: float) -> None:
+        self.hit_flash_timer = max(0.0, self.hit_flash_timer - dt)
 
     def distance_to(self, x: float, y: float) -> float:
         return math.hypot(self.x - x, self.y - y)

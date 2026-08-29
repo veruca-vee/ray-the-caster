@@ -9,18 +9,31 @@ import math
 
 import pygame
 
-from game.enemy import Enemy
+from game.enemy import HIT_FLASH_DURATION, Enemy
 from game.player import Player
 from game.raycasting import RayHit
 from game.sprites import project_sprite
 from game.textures import TEXTURE_SIZE
 
-CEILING_COLOR = (40, 40, 60)
-FLOOR_COLOR = (55, 55, 55)
+CEILING_TOP_COLOR = (22, 22, 38)
+CEILING_HORIZON_COLOR = (52, 52, 78)
+FLOOR_HORIZON_COLOR = (68, 68, 68)
+FLOOR_BOTTOM_COLOR = (32, 32, 32)
+BACKGROUND_BANDS = 8
+
 ENEMY_COLOR = (220, 90, 220)  # violet, contrasts against all wall palettes
-ENEMY_HIT_FLASH_COLOR = (255, 220, 220)
+ENEMY_CORE_COLOR = (255, 250, 220)  # bright "molten core" highlight on each enemy
+ENEMY_HIT_FLASH_COLOR = (255, 255, 255)
 HUD_TEXT_COLOR = (240, 240, 240)
+HUD_PANEL_COLOR = (15, 15, 20)
 CROSSHAIR_COLOR = (255, 140, 0)  # molten orange, matches Ray's disk caster
+
+WEAPON_RING_COLOR = (110, 45, 10)
+WEAPON_GLOW_COLOR = (255, 150, 40)
+WEAPON_CORE_COLOR = (255, 140, 30)
+WEAPON_FLASH_CORE_COLOR = (255, 235, 190)
+WEAPON_BASE_RADIUS = 34
+MUZZLE_FLASH_DURATION = 0.12
 
 MAX_SHADE_DISTANCE = 12.0
 
@@ -30,6 +43,11 @@ def _shade_for_distance(color: tuple, distance: float, side: int) -> tuple:
     side_factor = 0.75 if side == 1 else 1.0
     factor = fog * side_factor
     return tuple(max(0, min(255, int(c * factor))) for c in color)
+
+
+def _lerp_color(a: tuple, b: tuple, t: float) -> tuple:
+    t = max(0.0, min(1.0, t))
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
 class Renderer:
@@ -43,20 +61,38 @@ class Renderer:
         self.font = pygame.font.SysFont(None, 24)
 
     def draw_frame(self, wall_hits: list[RayHit], enemies: list[Enemy], player: Player,
-                   fov: float, ammo: int) -> None:
+                   fov: float, ammo: int, weapon_flash_elapsed: float = math.inf) -> None:
         surface = self.render_surface
-        half_h = self.render_height // 2
-
-        surface.fill(CEILING_COLOR, pygame.Rect(0, 0, self.render_width, half_h))
-        surface.fill(FLOOR_COLOR, pygame.Rect(0, half_h, self.render_width, self.render_height - half_h))
+        self._draw_background(surface)
 
         depth_buffer = self._draw_walls(surface, wall_hits)
         self._draw_enemies(surface, enemies, player, fov, depth_buffer)
+        self._draw_weapon(surface, weapon_flash_elapsed)
         self._draw_crosshair(surface)
 
         pygame.transform.scale(surface, self.screen.get_size(), self.screen)
         self._draw_hud(player, ammo, enemies)
         pygame.display.flip()
+
+    def _draw_background(self, surface: pygame.Surface) -> None:
+        half_h = self.render_height // 2
+        band_height = max(1, half_h // BACKGROUND_BANDS)
+
+        for i in range(BACKGROUND_BANDS):
+            t = i / (BACKGROUND_BANDS - 1)
+            y0 = i * band_height
+            y1 = half_h if i == BACKGROUND_BANDS - 1 else y0 + band_height
+            color = _lerp_color(CEILING_TOP_COLOR, CEILING_HORIZON_COLOR, t)
+            surface.fill(color, pygame.Rect(0, y0, self.render_width, y1 - y0))
+
+        floor_height = self.render_height - half_h
+        band_height = max(1, floor_height // BACKGROUND_BANDS)
+        for i in range(BACKGROUND_BANDS):
+            t = i / (BACKGROUND_BANDS - 1)
+            y0 = half_h + i * band_height
+            y1 = self.render_height if i == BACKGROUND_BANDS - 1 else y0 + band_height
+            color = _lerp_color(FLOOR_HORIZON_COLOR, FLOOR_BOTTOM_COLOR, t)
+            surface.fill(color, pygame.Rect(0, y0, self.render_width, y1 - y0))
 
     def _draw_walls(self, surface: pygame.Surface, wall_hits: list[RayHit]) -> list[float]:
         depth_buffer = [math.inf] * len(wall_hits)
@@ -100,7 +136,14 @@ class Renderer:
                 continue
 
             color = _shade_for_distance(ENEMY_COLOR, projection.distance, side=0)
+            if enemy.hit_flash_timer > 0:
+                flash_t = enemy.hit_flash_timer / HIT_FLASH_DURATION
+                color = _lerp_color(color, ENEMY_HIT_FLASH_COLOR, flash_t)
             center_y = self.render_height // 2
+
+            center_col = int(round(projection.screen_x))
+            center_visible = (0 <= center_col < self.render_width
+                               and projection.distance < depth_buffer[center_col])
 
             for col in range(col_start, col_end + 1):
                 if projection.distance >= depth_buffer[col]:
@@ -115,6 +158,35 @@ class Renderer:
                     (col, center_y + column_half_height),
                 )
 
+            if center_visible:
+                # A small bright "molten core" so sprites read as glowing
+                # creatures rather than flat silhouettes.
+                core_color = _shade_for_distance(ENEMY_CORE_COLOR, projection.distance, side=0)
+                core_radius = max(1, int(half * 0.25))
+                core_pos = (center_col, int(center_y - half * 0.3))
+                pygame.draw.circle(surface, core_color, core_pos, core_radius)
+
+    def _draw_weapon(self, surface: pygame.Surface, flash_elapsed: float) -> None:
+        flash_t = max(0.0, 1.0 - flash_elapsed / MUZZLE_FLASH_DURATION) if flash_elapsed < MUZZLE_FLASH_DURATION else 0.0
+        recoil = int(14 * flash_t)
+        radius = WEAPON_BASE_RADIUS + int(6 * flash_t)
+
+        cx = self.render_width // 2
+        cy = self.render_height + 8 - recoil  # mostly off-screen; only the top cap pokes up
+
+        pygame.draw.circle(surface, WEAPON_RING_COLOR, (cx, cy), radius + 5)
+        pygame.draw.circle(surface, WEAPON_GLOW_COLOR, (cx, cy), radius)
+        core_color = _lerp_color(WEAPON_CORE_COLOR, WEAPON_FLASH_CORE_COLOR, flash_t)
+        pygame.draw.circle(surface, core_color, (cx, cy), max(2, radius - 10))
+
+        if flash_t > 0:
+            flash_radius = int(26 * flash_t)
+            flash_pos = (cx, self.render_height // 2 + 14)
+            flash_surface = pygame.Surface((flash_radius * 2, flash_radius * 2), pygame.SRCALPHA)
+            alpha = int(200 * flash_t)
+            pygame.draw.circle(flash_surface, (*WEAPON_FLASH_CORE_COLOR, alpha), (flash_radius, flash_radius), flash_radius)
+            surface.blit(flash_surface, (flash_pos[0] - flash_radius, flash_pos[1] - flash_radius))
+
     def _draw_crosshair(self, surface: pygame.Surface) -> None:
         cx, cy = self.render_width // 2, self.render_height // 2
         pygame.draw.line(surface, CROSSHAIR_COLOR, (cx - 5, cy), (cx + 5, cy))
@@ -124,4 +196,9 @@ class Renderer:
         remaining = sum(1 for e in enemies if e.is_alive)
         text = f"HP: {player.health}   Disks: {ammo}   Enemies left: {remaining}"
         text_surface = self.font.render(text, True, HUD_TEXT_COLOR)
-        self.screen.blit(text_surface, (10, self.screen.get_height() - 30))
+
+        panel_height = 34
+        panel = pygame.Surface((self.screen.get_width(), panel_height), pygame.SRCALPHA)
+        panel.fill((*HUD_PANEL_COLOR, 160))
+        self.screen.blit(panel, (0, self.screen.get_height() - panel_height))
+        self.screen.blit(text_surface, (10, self.screen.get_height() - panel_height + 6))

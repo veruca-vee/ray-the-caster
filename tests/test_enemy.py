@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from game.enemy import Enemy, find_closest_hit_enemy
+from game.enemy import HIT_FLASH_DURATION, Enemy, find_closest_hit_enemy
 
 
 def test_take_damage_reduces_health():
@@ -17,6 +17,35 @@ def test_take_damage_kills_at_zero():
     e.take_damage(3)
     assert e.health == 0
     assert e.is_alive is False
+
+
+def test_take_damage_starts_hit_flash():
+    e = Enemy(0, 0, health=3, radius=0.3)
+    assert e.hit_flash_timer == 0.0
+    e.take_damage(1)
+    assert e.hit_flash_timer == pytest.approx(HIT_FLASH_DURATION)
+
+
+def test_tick_decays_hit_flash_timer():
+    e = Enemy(0, 0, health=3, radius=0.3)
+    e.take_damage(1)
+    e.tick(HIT_FLASH_DURATION / 2)
+    assert e.hit_flash_timer == pytest.approx(HIT_FLASH_DURATION / 2)
+
+
+def test_tick_clamps_hit_flash_timer_at_zero():
+    e = Enemy(0, 0, health=3, radius=0.3)
+    e.take_damage(1)
+    e.tick(HIT_FLASH_DURATION * 10)
+    assert e.hit_flash_timer == 0.0
+
+
+def test_damage_while_already_flashing_resets_timer():
+    e = Enemy(0, 0, health=3, radius=0.3)
+    e.take_damage(1)
+    e.tick(HIT_FLASH_DURATION * 0.9)
+    e.take_damage(1)
+    assert e.hit_flash_timer == pytest.approx(HIT_FLASH_DURATION)
 
 
 def test_take_damage_does_not_go_negative():
